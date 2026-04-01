@@ -135,6 +135,11 @@ $catIcons = ['Design'=>'🎨','Tech'=>'💻','Writing'=>'📝','Photography'=>'�
   </div>
 </div>
 
+<!-- CSRF Token for JS -->
+<script>
+const CSRF_TOKEN = "<?= \App\Core\CSRF::token() ?>";
+</script>
+
 <!-- ── Request Modal ── -->
 <?php if (Auth::check() && !$isOwner): ?>
 <div class="modal-overlay" id="modal-request">
@@ -156,6 +161,35 @@ $catIcons = ['Design'=>'🎨','Tech'=>'💻','Writing'=>'📝','Photography'=>'�
     </div>
   </div>
 </div>
+
+<script>
+// Submit request with CSRF token
+function submitRequest() {
+  const serviceId = document.getElementById('reqServiceId').value;
+  const message   = document.getElementById('reqMessage').value;
+
+  const formData = new FormData();
+  formData.append('service_id', serviceId);
+  formData.append('message', message);
+  formData.append('_csrf_token', CSRF_TOKEN);
+
+  fetch('<?= APP_BASE ?>/swaps/request', {
+    method: 'POST',
+    body: formData,
+    credentials: 'same-origin'
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      alert(data.message);
+      closeModal('request');
+    } else {
+      alert(data.error);
+    }
+  })
+  .catch(() => alert('Something went wrong.'));
+}
+</script>
 <?php endif; ?>
 
 <?php require APP_ROOT . '/app/Views/layouts/footer.php'; ?>
