@@ -61,48 +61,55 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
     <!-- ── Main content ── -->
     <div class="dash-main">
 
-      <!-- Active Swaps -->
-      <div class="card">
-        <div class="flex-between" style="margin-bottom:16px">
-          <h2 class="card-title" style="margin-bottom:0">Active Swaps</h2>
-          <a href="<?= APP_BASE ?>/messages" style="font-size:13px;color:var(--caramel)">View messages →</a>
-        </div>
+     <!-- Active Swaps -->
+<div class="card">
+  <div class="flex-between" style="margin-bottom:16px">
+    <h2 class="card-title" style="margin-bottom:0">Active Swaps</h2>
+    <a href="<?= APP_BASE ?>/messages" style="font-size:13px;color:var(--caramel)">View messages →</a>
+  </div>
 
-        <?php
-          $activeList = array_filter($mySwaps, fn($s) => !in_array($s['status'], ['completed','declined']));
-        ?>
-        <?php if (empty($activeList)): ?>
-          <div class="empty-state" style="padding:30px 0">
-            <div class="empty-icon">🤝</div>
-            <p>No active swaps yet. <a href="<?= APP_BASE ?>/services" style="color:var(--caramel)">Browse services</a> to get started.</p>
+  <?php
+    $activeList = array_filter($mySwaps, fn($s) => !in_array($s['status'], ['completed','declined']));
+  ?>
+  <?php if (empty($activeList)): ?>
+    <div class="empty-state" style="padding:30px 0">
+      <div class="empty-icon">🤝</div>
+      <p>No active swaps yet. <a href="<?= APP_BASE ?>/services" style="color:var(--caramel)">Browse services</a> to get started.</p>
+    </div>
+  <?php else: ?>
+    <?php foreach (array_slice($activeList, 0, 5) as $swap): ?>
+      <div class="swap-item">
+        <div class="swap-icon"><?= $statusIcon[$swap['status']] ?? '📋' ?></div>
+        <div class="swap-info">
+          <div class="swap-title"><?= Validator::e($swap['service_title']) ?></div>
+          <div class="swap-with">
+            with <?= Validator::e(Auth::id() === (int)$swap['requester_id'] ? $swap['provider_name'] : $swap['requester_name']) ?>
           </div>
-        <?php else: ?>
-          <?php foreach (array_slice($activeList, 0, 5) as $swap): ?>
-            <div class="swap-item">
-              <div class="swap-icon"><?= $statusIcon[$swap['status']] ?? '📋' ?></div>
-              <div class="swap-info">
-                <div class="swap-title"><?= Validator::e($swap['service_title']) ?></div>
-                <div class="swap-with">
-                  with <?= Validator::e(Auth::id() === (int)$swap['requester_id'] ? $swap['provider_name'] : $swap['requester_name']) ?>
-                </div>
-              </div>
-              <div style="display:flex;align-items:center;gap:8px">
-                <span class="badge badge-<?= Validator::e($swap['status']) ?>"><?= ucfirst(str_replace('_',' ',$swap['status'])) ?></span>
-                <a href="<?= APP_BASE ?>/messages/<?= (int)$swap['id'] ?>" class="btn btn-outline btn-sm">Chat</a>
-                <?php if ($swap['status'] === 'requested' && Auth::id() === (int)$swap['provider_id']): ?>
-                  <button class="btn btn-primary btn-sm"
-                          onclick="swapAction(<?= (int)$swap['id'] ?>, 'accept', this)">Accept</button>
-                  <button class="btn btn-ghost btn-sm"
-                          onclick="swapAction(<?= (int)$swap['id'] ?>, 'decline', this)">Decline</button>
-                <?php elseif ($swap['status'] === 'accepted' && Auth::id() === (int)$swap['requester_id']): ?>
-                  <button class="btn btn-primary btn-sm"
-                          onclick="swapAction(<?= (int)$swap['id'] ?>, 'complete', this)">✓ Complete</button>
-                <?php endif; ?>
-              </div>
-            </div>
-          <?php endforeach; ?>
-        <?php endif; ?>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="badge badge-<?= Validator::e($swap['status']) ?>"><?= ucfirst(str_replace('_',' ',$swap['status'])) ?></span>
+          <a href="<?= APP_BASE ?>/messages/<?= (int)$swap['id'] ?>" class="btn btn-outline btn-sm">Chat</a>
+
+          <!-- Provider actions -->
+          <?php if ($swap['status'] === 'requested' && Auth::id() === (int)$swap['provider_id']): ?>
+            <button class="btn btn-primary btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'accept', this)">Accept</button>
+            <button class="btn btn-ghost btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'decline', this)">Decline</button>
+          <?php endif; ?>
+
+          <!-- Requester actions -->
+          <?php if ($swap['status'] === 'requested' && Auth::id() === (int)$swap['requester_id']): ?>
+            <form method="POST" action="<?= APP_BASE ?>/swaps/<?= (int)$swap['id'] ?>/cancel" class="inline-form">
+              <input type="hidden" name="_csrf_token" value="<?= \App\Core\CSRF::getToken() ?>">
+              <button type="submit" class="btn btn-warning btn-sm">Cancel</button>
+            </form>
+          <?php elseif ($swap['status'] === 'accepted' && Auth::id() === (int)$swap['requester_id']): ?>
+            <button class="btn btn-primary btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'complete', this)">✓ Complete</button>
+          <?php endif; ?>
+        </div>
       </div>
+    <?php endforeach; ?>
+  <?php endif; ?>
+</div>
 
       <!-- My Listings -->
       <div class="card">
