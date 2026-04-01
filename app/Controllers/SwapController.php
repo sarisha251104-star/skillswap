@@ -35,7 +35,6 @@ class SwapController
         $service = $this->services->findWithOwner((int)$v->get('service_id'));
         if (!$service) { $this->jsonError('Service not found.', 404); return; }
 
-        // Can't request your own service
         if ((int)$service['user_id'] === Auth::id()) {
             $this->jsonError('You cannot request your own service.');
             return;
@@ -81,6 +80,31 @@ class SwapController
             : $this->jsonError('Unable to decline this swap.', 403);
     }
 
+    // POST /swaps/:id/cancel
+    public function cancel(array $params): void
+    {
+        Auth::requireLogin();
+        try { CSRF::verify($_POST['_csrf_token'] ?? ''); }
+        catch (\RuntimeException) { $this->jsonError('Invalid CSRF token.', 403); return; }
+
+        $swapId = (int)$params['id'];
+        $swap = $this->swaps->getSwap($swapId);
+
+        if (!$swap || (int)$swap['requester_id'] !== Auth::id()) {
+            $this->jsonError('Cannot cancel this swap.', 403);
+            return;
+        }
+
+        if ($swap['status'] !== SwapModel::STATUS_REQUESTED) {
+            $this->jsonError('Only pending requests can be canceled.');
+            return;
+        }
+
+        $ok = $this->swaps->cancel($swapId);
+        $ok ? $this->jsonSuccess(['message' => 'Request canceled. Credits returned to wallet.'])
+            : $this->jsonError('Unable to cancel this swap.', 403);
+    }
+
     // POST /swaps/:id/complete
     public function complete(array $params): void
     {
@@ -112,7 +136,6 @@ class SwapController
             return;
         }
 
-        // Determine who to review
         $revieweeId = (Auth::id() === (int)$swap['requester_id'])
             ? (int)$swap['provider_id']
             : (int)$swap['requester_id'];
