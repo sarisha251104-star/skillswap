@@ -6,6 +6,10 @@ use App\Middleware\Auth;
 use App\Models\SwapModel;
 require APP_ROOT . '/app/Views/layouts/header.php';
 
+// Generate CSRF token
+use App\Core\CSRF;
+$csrfToken = CSRF::generate();
+
 $statusIcon = ['requested'=>'⏳','accepted'=>'✅','in_progress'=>'🔄','completed'=>'🎉','declined'=>'❌','disputed'=>'⚠️'];
 $catIcons   = ['Design'=>'🎨','Tech'=>'💻','Writing'=>'📝','Photography'=>'📸','Tutoring'=>'🎓','Home Services'=>'🌿','Music'=>'🎵','Other'=>'✨'];
 $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services','Music','Other'];
@@ -21,7 +25,7 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
   </div>
 
   <div class="dash-grid">
-    <!-- ── Sidebar ── -->
+    <!-- Sidebar -->
     <div class="dash-sidebar">
       <div class="profile-card">
         <div class="profile-big-avatar"><?= strtoupper(mb_substr($user['full_name'], 0, 1)) ?></div>
@@ -31,8 +35,7 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
           <div class="credit-number" id="dashCredits"><?= (int)$user['credits'] ?></div>
           <div class="credit-label">Available Credits</div>
         </div>
-        <span class="badge badge-<?= Validator::e($user['subscription_plan']) ?>"
-              style="font-size:12px;padding:5px 14px">
+        <span class="badge badge-<?= Validator::e($user['subscription_plan']) ?>" style="font-size:12px;padding:5px 14px">
           <?= ucfirst(Validator::e($user['subscription_plan'])) ?> Plan
         </span>
       </div>
@@ -41,24 +44,15 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
         $swapsDone = count(array_filter($mySwaps, fn($s) => $s['status'] === 'completed'));
         $activeSwaps = count(array_filter($mySwaps, fn($s) => in_array($s['status'], ['accepted','in_progress'])));
       ?>
-      <div class="sidebar-stat-card">
-        <div class="sidebar-stat-label">Swaps Completed</div>
-        <div class="sidebar-stat-val"><?= $swapsDone ?></div>
-      </div>
-      <div class="sidebar-stat-card">
-        <div class="sidebar-stat-label">Active Swaps</div>
-        <div class="sidebar-stat-val"><?= $activeSwaps ?></div>
-      </div>
-      <div class="sidebar-stat-card">
-        <div class="sidebar-stat-label">My Listings</div>
-        <div class="sidebar-stat-val"><?= count($myServices) ?></div>
-      </div>
+      <div class="sidebar-stat-card"><div class="sidebar-stat-label">Swaps Completed</div><div class="sidebar-stat-val"><?= $swapsDone ?></div></div>
+      <div class="sidebar-stat-card"><div class="sidebar-stat-label">Active Swaps</div><div class="sidebar-stat-val"><?= $activeSwaps ?></div></div>
+      <div class="sidebar-stat-card"><div class="sidebar-stat-label">My Listings</div><div class="sidebar-stat-val"><?= count($myServices) ?></div></div>
 
       <a href="<?= APP_BASE ?>/profile" class="btn btn-outline" style="text-align:center">Edit Profile</a>
       <a href="<?= APP_BASE ?>/subscriptions" class="btn btn-dark" style="text-align:center">Upgrade Plan</a>
     </div>
 
-    <!-- ── Main content ── -->
+    <!-- Main content -->
     <div class="dash-main">
 
       <!-- Active Swaps -->
@@ -68,9 +62,7 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
           <a href="<?= APP_BASE ?>/messages" style="font-size:13px;color:var(--caramel)">View messages →</a>
         </div>
 
-        <?php
-          $activeList = array_filter($mySwaps, fn($s) => !in_array($s['status'], ['completed','declined']));
-        ?>
+        <?php $activeList = array_filter($mySwaps, fn($s) => !in_array($s['status'], ['completed','declined'])); ?>
         <?php if (empty($activeList)): ?>
           <div class="empty-state" style="padding:30px 0">
             <div class="empty-icon">🤝</div>
@@ -89,14 +81,19 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
               <div style="display:flex;align-items:center;gap:8px">
                 <span class="badge badge-<?= Validator::e($swap['status']) ?>"><?= ucfirst(str_replace('_',' ',$swap['status'])) ?></span>
                 <a href="<?= APP_BASE ?>/messages/<?= (int)$swap['id'] ?>" class="btn btn-outline btn-sm">Chat</a>
+
+                <!-- Accept/Decline for provider -->
                 <?php if ($swap['status'] === 'requested' && Auth::id() === (int)$swap['provider_id']): ?>
-                  <button class="btn btn-primary btn-sm"
-                          onclick="swapAction(<?= (int)$swap['id'] ?>, 'accept', this)">Accept</button>
-                  <button class="btn btn-ghost btn-sm"
-                          onclick="swapAction(<?= (int)$swap['id'] ?>, 'decline', this)">Decline</button>
+                  <button class="btn btn-primary btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'accept', this)">Accept</button>
+                  <button class="btn btn-ghost btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'decline', this)">Decline</button>
+
+                <!-- Complete for requester -->
                 <?php elseif ($swap['status'] === 'accepted' && Auth::id() === (int)$swap['requester_id']): ?>
-                  <button class="btn btn-primary btn-sm"
-                          onclick="swapAction(<?= (int)$swap['id'] ?>, 'complete', this)">✓ Complete</button>
+                  <button class="btn btn-primary btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'complete', this)">✓ Complete</button>
+
+                <!-- Cancel for requester on requested swaps -->
+                <?php elseif ($swap['status'] === 'requested' && Auth::id() === (int)$swap['requester_id']): ?>
+                  <button class="btn btn-danger btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'cancel', this)">Cancel</button>
                 <?php endif; ?>
               </div>
             </div>
@@ -132,111 +129,22 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
           <?php endforeach; ?>
         <?php endif; ?>
       </div>
-
-      <!-- Completed swaps -->
-      <?php
-        $completedList = array_filter($mySwaps, fn($s) => $s['status'] === 'completed');
-      ?>
-      <?php if (!empty($completedList)): ?>
-      <div class="card">
-        <h2 class="card-title">Completed Swaps</h2>
-        <?php foreach (array_slice($completedList, 0, 4) as $swap): ?>
-          <div class="swap-item">
-            <div class="swap-icon">🎉</div>
-            <div class="swap-info">
-              <div class="swap-title"><?= Validator::e($swap['service_title']) ?></div>
-              <div class="swap-with">with <?= Validator::e(Auth::id() === (int)$swap['requester_id'] ? $swap['provider_name'] : $swap['requester_name']) ?></div>
-            </div>
-            <button class="btn btn-outline btn-sm" onclick="openReviewModal(<?= (int)$swap['id'] ?>)">
-              ★ Review
-            </button>
-          </div>
-        <?php endforeach; ?>
-      </div>
-      <?php endif; ?>
-    </div>
-  </div>
-</div>
-
-<!-- ── Add Service Modal ── -->
-<div class="modal-overlay" id="modal-addService">
-  <div class="modal">
-    <h2 class="modal-title">List a Service</h2>
-    <p class="modal-sub">Offer your skills and earn credits</p>
-    <form onsubmit="submitService(event)">
-      <div class="form-group">
-        <label>Service title</label>
-        <input type="text" name="title" placeholder="e.g. Responsive Landing Page Design" required>
-      </div>
-      <div class="form-group">
-        <label>Category</label>
-        <select name="category" required>
-          <?php foreach ($categories as $cat): ?>
-            <option value="<?= Validator::e($cat) ?>"><?= Validator::e($cat) ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Description</label>
-        <textarea name="description" rows="3" placeholder="Describe what you'll provide…" required></textarea>
-      </div>
-      <div class="form-group">
-        <label>Credit value (1–500)</label>
-        <input type="number" name="credits" min="1" max="500" placeholder="25" required>
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-ghost" onclick="closeModal('addService')">Cancel</button>
-        <button type="submit" class="btn btn-primary">Publish Listing</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- ── Review Modal ── -->
-<div class="modal-overlay" id="modal-review">
-  <div class="modal">
-    <h2 class="modal-title">Leave a Review</h2>
-    <p class="modal-sub">Rate your experience with this swap</p>
-    <input type="hidden" id="reviewSwapId">
-    <div class="form-group">
-      <label>Rating</label>
-      <div id="starContainer" style="display:flex;gap:8px;font-size:28px;cursor:pointer;margin-bottom:4px">
-        <?php for ($i = 1; $i <= 5; $i++): ?>
-          <span class="star" data-val="<?= $i ?>" style="color:var(--light);transition:color .15s">★</span>
-        <?php endfor; ?>
-      </div>
-      <input type="hidden" id="reviewRating" name="rating" value="5">
-    </div>
-    <div class="form-group">
-      <label>Comment</label>
-      <textarea id="reviewComment" rows="3" placeholder="How was your experience with this swap?"></textarea>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('review')">Cancel</button>
-      <button class="btn btn-primary" id="reviewSubmitBtn" onclick="submitReview()">Submit Review</button>
     </div>
   </div>
 </div>
 
 <script>
-// Activate star on hover/click
-document.querySelectorAll('.star').forEach(star => {
-  star.addEventListener('mouseover', () => {
-    const val = parseInt(star.dataset.val);
-    document.querySelectorAll('.star').forEach(s => {
-      s.style.color = parseInt(s.dataset.val) <= val ? 'var(--caramel)' : 'var(--light)';
+function swapAction(swapId, action, btn) {
+    if(!confirm('Are you sure?')) return;
+    fetch(`<?= APP_BASE ?>/swaps/${swapId}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ _csrf_token: '<?= $csrfToken ?>' })
+    }).then(r => r.json()).then(res => {
+        if(res.success) location.reload();
+        else alert(res.error);
     });
-  });
-  star.addEventListener('click', () => {
-    document.getElementById('reviewRating').value = star.dataset.val;
-  });
-});
-document.getElementById('starContainer')?.addEventListener('mouseleave', () => {
-  const val = parseInt(document.getElementById('reviewRating').value);
-  document.querySelectorAll('.star').forEach(s => {
-    s.style.color = parseInt(s.dataset.val) <= val ? 'var(--caramel)' : 'var(--light)';
-  });
-});
+}
 </script>
 
 <?php require APP_ROOT . '/app/Views/layouts/footer.php'; ?>
