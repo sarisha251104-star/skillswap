@@ -10,36 +10,30 @@ class SwapModel extends BaseModel
 {
     protected string $table = 'swap_requests';
 
-    public const STATUS_REQUESTED  = 'requested';
-    public const STATUS_ACCEPTED   = 'accepted';
+    public const STATUS_REQUESTED   = 'requested';
+    public const STATUS_ACCEPTED    = 'accepted';
     public const STATUS_IN_PROGRESS = 'in_progress';
     public const STATUS_COMPLETED   = 'completed';
-    public const STATUS_DECLINED   = 'declined';
-    public const STATUS_DISPUTED   = 'disputed';
+    public const STATUS_DECLINED    = 'declined';
+    public const STATUS_DISPUTED    = 'disputed';
+    public const STATUS_CANCELED    = 'canceled';
 
-    /**
-     * Create a swap request and lock credits into escrow atomically.
-     */
     public function createWithEscrow(int $requesterId, int $providerId, int $serviceId, int $credits, string $message): int|false
     {
         try {
             $this->db->beginTransaction();
 
-            // 1. Check requester has enough credits
             $stmt = $this->db->prepare('SELECT credits FROM users WHERE id = ? FOR UPDATE');
             $stmt->execute([$requesterId]);
             $row = $stmt->fetch();
-
             if (!$row || (int)$row['credits'] < $credits) {
                 $this->db->rollBack();
-                return false; // Insufficient credits
+                return false;
             }
 
-            // 2. Deduct from requester
             $this->db->prepare('UPDATE users SET credits = credits - ? WHERE id = ?')
                      ->execute([$credits, $requesterId]);
 
-            // 3. Create the swap record
             $this->db->prepare(
                 'INSERT INTO swap_requests
                  (requester_id, provider_id, service_id, credits_escrowed, message, status, created_at, updated_at)
@@ -48,7 +42,6 @@ class SwapModel extends BaseModel
 
             $swapId = (int)$this->db->lastInsertId();
 
-            // 4. Record escrow ledger entry
             $this->db->prepare(
                 'INSERT INTO escrow_ledger (swap_id, user_id, amount, type, created_at)
                  VALUES (?,?,?,?,NOW())'
@@ -64,9 +57,6 @@ class SwapModel extends BaseModel
         }
     }
 
-    /**
-     * Provider accepts a swap.
-     */
     public function accept(int $swapId, int $providerId): bool
     {
         $stmt = $this->db->prepare(
@@ -76,9 +66,6 @@ class SwapModel extends BaseModel
         return $stmt->execute([self::STATUS_ACCEPTED, $swapId, $providerId, self::STATUS_REQUESTED]);
     }
 
-    /**
-     * Provider declines — credits returned to requester.
-     */
     public function decline(int $swapId, int $providerId): bool
     {
         try {
@@ -90,7 +77,6 @@ class SwapModel extends BaseModel
                 return false;
             }
 
-            // Return credits
             $this->db->prepare('UPDATE users SET credits = credits + ? WHERE id = ?')
                      ->execute([$swap['credits_escrowed'], $swap['requester_id']]);
 
@@ -111,9 +97,37 @@ class SwapModel extends BaseModel
         }
     }
 
-    /**
-     * Requester confirms completion — credits released to provider.
-     */
+    public function cancel(int $swapId): bool
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $swap = $this->getSwap($swapId);
+            if (!$swap || $swap['status'] !== self::STATUS_REQUESTED) {
+                $this->db->rollBack();
+                return false;
+            }
+
+            $this->db->prepare('UPDATE users SET credits = credits + ? WHERE id = ?')
+                     ->execute([$swap['credits_escrowed'], $swap['requester_id']]);
+
+            $this->db->prepare('UPDATE swap_requests SET status=?, updated_at=NOW() WHERE id=?')
+                     ->execute([self::STATUS_CANCELED, $swapId]);
+
+            $this->db->prepare(
+                'INSERT INTO escrow_ledger (swap_id, user_id, amount, type, created_at) VALUES (?,?,?,?,NOW())'
+            )->execute([$swapId, $swap['requester_id'], $swap['credits_escrowed'], 'returned']);
+
+            $this->db->commit();
+            return true;
+
+        } catch (\Throwable $e) {
+            $this->db->rollBack();
+            error_log('SwapModel::cancel failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     public function confirmComplete(int $swapId, int $requesterId): bool
     {
         try {
@@ -125,7 +139,6 @@ class SwapModel extends BaseModel
                 return false;
             }
 
-            // Release credits to provider
             $this->db->prepare('UPDATE users SET credits = credits + ? WHERE id = ?')
                      ->execute([$swap['credits_escrowed'], $swap['provider_id']]);
 
