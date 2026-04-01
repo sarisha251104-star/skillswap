@@ -17,9 +17,7 @@ class SwapModel extends BaseModel
     public const STATUS_DECLINED   = 'declined';
     public const STATUS_DISPUTED   = 'disputed';
 
-    /**
-     * Create a swap request and lock credits into escrow atomically.
-     */
+   
     public function createWithEscrow(int $requesterId, int $providerId, int $serviceId, int $credits, string $message): int|false
     {
         try {
@@ -64,9 +62,7 @@ class SwapModel extends BaseModel
         }
     }
 
-    /**
-     * Provider accepts a swap.
-     */
+   
     public function accept(int $swapId, int $providerId): bool
     {
         $stmt = $this->db->prepare(
@@ -76,9 +72,7 @@ class SwapModel extends BaseModel
         return $stmt->execute([self::STATUS_ACCEPTED, $swapId, $providerId, self::STATUS_REQUESTED]);
     }
 
-    /**
-     * Provider declines — credits returned to requester.
-     */
+   
     public function decline(int $swapId, int $providerId): bool
     {
         try {
@@ -111,9 +105,7 @@ class SwapModel extends BaseModel
         }
     }
 
-    /**
-     * Requester confirms completion — credits released to provider.
-     */
+  
     public function confirmComplete(int $swapId, int $requesterId): bool
     {
         try {
