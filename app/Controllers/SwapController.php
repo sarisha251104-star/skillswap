@@ -10,7 +10,7 @@ use App\Models\{SwapModel, ServiceModel, ReviewModel};
 
 class SwapController
 {
-    private SwapModel    $swaps;
+    private SwapModel $swaps;
     private ServiceModel $services;
 
     public function __construct()
@@ -35,10 +35,8 @@ class SwapController
         $service = $this->services->findWithOwner((int)$v->get('service_id'));
         if (!$service) { $this->jsonError('Service not found.', 404); return; }
 
-        // Can't request your own service
         if ((int)$service['user_id'] === Auth::id()) {
-            $this->jsonError('You cannot request your own service.');
-            return;
+            $this->jsonError('You cannot request your own service.'); return;
         }
 
         $swapId = $this->swaps->createWithEscrow(
@@ -50,8 +48,7 @@ class SwapController
         );
 
         if ($swapId === false) {
-            $this->jsonError('Insufficient credits to make this request.');
-            return;
+            $this->jsonError('Insufficient credits to make this request.'); return;
         }
 
         $this->jsonSuccess(['swap_id' => $swapId, 'message' => 'Request sent. Credits are held in escrow.']);
@@ -79,6 +76,18 @@ class SwapController
         $ok = $this->swaps->decline((int)$params['id'], Auth::id());
         $ok ? $this->jsonSuccess(['message' => 'Swap declined. Credits returned to requester.'])
             : $this->jsonError('Unable to decline this swap.', 403);
+    }
+
+    // POST /swaps/:id/cancel
+    public function cancel(array $params): void
+    {
+        Auth::requireLogin();
+        try { CSRF::verify($_POST['_csrf_token'] ?? ''); }
+        catch (\RuntimeException) { $this->jsonError('Invalid CSRF token.', 403); return; }
+
+        $ok = $this->swaps->cancelRequest((int)$params['id'], Auth::id());
+        $ok ? $this->jsonSuccess(['message' => 'Request canceled. Credits returned to your wallet.'])
+            : $this->jsonError('Unable to cancel this request.', 403);
     }
 
     // POST /swaps/:id/complete
@@ -112,19 +121,12 @@ class SwapController
             return;
         }
 
-        // Determine who to review
         $revieweeId = (Auth::id() === (int)$swap['requester_id'])
             ? (int)$swap['provider_id']
             : (int)$swap['requester_id'];
 
         $reviews = new ReviewModel();
-        $id = $reviews->create(
-            (int)$swap['id'],
-            Auth::id(),
-            $revieweeId,
-            (int)$v->get('rating'),
-            $v->get('comment')
-        );
+        $id = $reviews->create((int)$swap['id'], Auth::id(), $revieweeId, (int)$v->get('rating'), $v->get('comment'));
 
         $id ? $this->jsonSuccess(['message' => 'Review submitted.'])
             : $this->jsonError('You have already reviewed this swap.');
@@ -135,12 +137,9 @@ class SwapController
     {
         Auth::requireLogin();
         $swapId = (int)$params['id'];
-
         if (!$this->swaps->canAccess($swapId, Auth::id())) {
-            http_response_code(403);
-            exit('Access denied.');
+            http_response_code(403); exit('Access denied.');
         }
-
         $swap = $this->swaps->getSwapWithDetails($swapId);
         require APP_ROOT . '/app/Views/swaps/detail.php';
     }
