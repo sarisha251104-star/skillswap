@@ -4,157 +4,94 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
-use App\Core\{CSRF, Validator};
-use App\Middleware\Auth;
-use App\Models\{SwapModel, ServiceModel, ReviewModel};
+use App\Core\Controller;
+use App\Core\Request;
+use App\Core\Response;
+use App\Core\Validator;
+use App\Core\Auth;
+use App\Core\CSRF;
+use App\Models\SwapModel;
 
-class SwapController
+class SwapController extends Controller
 {
-    private SwapModel    $swaps;
-    private ServiceModel $services;
+    protected SwapModel $swapModel;
 
     public function __construct()
     {
-        $this->swaps    = new SwapModel();
-        $this->services = new ServiceModel();
+        $this->swapModel = new SwapModel();
     }
 
-    // POST /swaps/request
-    public function request(): void
+    /**
+     * Accept a swap (Provider)
+     */
+    public function accept(Request $request, Response $response, int $swapId)
     {
-        Auth::requireLogin();
-        try { CSRF::verify($_POST['_csrf_token'] ?? ''); }
-        catch (\RuntimeException) { $this->jsonError('Invalid CSRF token.', 403); return; }
+        $userId = Auth::id();
 
-        $v = new Validator($_POST);
-        $v->required('service_id')->integer('service_id')
-          ->required('message')->min('message', 10)->max('message', 500);
-
-        if ($v->fails()) { $this->jsonError(array_values($v->errors())[0]); return; }
-
-        $service = $this->services->findWithOwner((int)$v->get('service_id'));
-        if (!$service) { $this->jsonError('Service not found.', 404); return; }
-
-        // Can't request your own service
-        if ((int)$service['user_id'] === Auth::id()) {
-            $this->jsonError('You cannot request your own service.');
-            return;
+        if ($this->swapModel->accept($swapId, $userId)) {
+            return $response->redirect(APP_BASE . '/dashboard?msg=Swap+accepted');
         }
 
-        $swapId = $this->swaps->createWithEscrow(
-            Auth::id(),
-            (int)$service['user_id'],
-            (int)$service['id'],
-            (int)$service['credits'],
-            $v->get('message')
-        );
+        return $response->redirect(APP_BASE . '/dashboard?error=Cannot+accept+swap');
+    }
 
-        if ($swapId === false) {
-            $this->jsonError('Insufficient credits to make this request.');
-            return;
+    /**
+     * Decline a swap (Provider)
+     */
+    public function decline(Request $request, Response $response, int $swapId)
+    {
+        $userId = Auth::id();
+
+        if ($this->swapModel->decline($swapId, $userId)) {
+            return $response->redirect(APP_BASE . '/dashboard?msg=Swap+declined');
         }
 
-        $this->jsonSuccess(['swap_id' => $swapId, 'message' => 'Request sent. Credits are held in escrow.']);
+        return $response->redirect(APP_BASE . '/dashboard?error=Cannot+decline+swap');
     }
 
-    // POST /swaps/:id/accept
-    public function accept(array $params): void
+    /**
+     * Complete a swap (Requester)
+     */
+    public function complete(Request $request, Response $response, int $swapId)
     {
-        Auth::requireLogin();
-        try { CSRF::verify($_POST['_csrf_token'] ?? ''); }
-        catch (\RuntimeException) { $this->jsonError('Invalid CSRF token.', 403); return; }
+        $userId = Auth::id();
 
-        $ok = $this->swaps->accept((int)$params['id'], Auth::id());
-        $ok ? $this->jsonSuccess(['message' => 'Swap accepted. You can now message the requester.'])
-            : $this->jsonError('Unable to accept this swap.', 403);
-    }
-
-    // POST /swaps/:id/decline
-    public function decline(array $params): void
-    {
-        Auth::requireLogin();
-        try { CSRF::verify($_POST['_csrf_token'] ?? ''); }
-        catch (\RuntimeException) { $this->jsonError('Invalid CSRF token.', 403); return; }
-
-        $ok = $this->swaps->decline((int)$params['id'], Auth::id());
-        $ok ? $this->jsonSuccess(['message' => 'Swap declined. Credits returned to requester.'])
-            : $this->jsonError('Unable to decline this swap.', 403);
-    }
-
-    // POST /swaps/:id/complete
-    public function complete(array $params): void
-    {
-        Auth::requireLogin();
-        try { CSRF::verify($_POST['_csrf_token'] ?? ''); }
-        catch (\RuntimeException) { $this->jsonError('Invalid CSRF token.', 403); return; }
-
-        $ok = $this->swaps->confirmComplete((int)$params['id'], Auth::id());
-        $ok ? $this->jsonSuccess(['message' => 'Swap completed! Credits released to provider.'])
-            : $this->jsonError('Unable to complete this swap.', 403);
-    }
-
-    // POST /swaps/:id/review
-    public function review(array $params): void
-    {
-        Auth::requireLogin();
-        try { CSRF::verify($_POST['_csrf_token'] ?? ''); }
-        catch (\RuntimeException) { $this->jsonError('Invalid CSRF token.', 403); return; }
-
-        $v = new Validator($_POST);
-        $v->required('rating')->integer('rating')->range('rating', 1, 5)
-          ->required('comment')->min('comment', 5)->max('comment', 500);
-
-        if ($v->fails()) { $this->jsonError(array_values($v->errors())[0]); return; }
-
-        $swap = $this->swaps->getSwap((int)$params['id']);
-        if (!$swap || $swap['status'] !== SwapModel::STATUS_COMPLETED) {
-            $this->jsonError('Swap must be completed before reviewing.');
-            return;
+        if ($this->swapModel->confirmComplete($swapId, $userId)) {
+            return $response->redirect(APP_BASE . '/dashboard?msg=Swap+completed');
         }
 
-        // Determine who to review
-        $revieweeId = (Auth::id() === (int)$swap['requester_id'])
-            ? (int)$swap['provider_id']
-            : (int)$swap['requester_id'];
-
-        $reviews = new ReviewModel();
-        $id = $reviews->create(
-            (int)$swap['id'],
-            Auth::id(),
-            $revieweeId,
-            (int)$v->get('rating'),
-            $v->get('comment')
-        );
-
-        $id ? $this->jsonSuccess(['message' => 'Review submitted.'])
-            : $this->jsonError('You have already reviewed this swap.');
+        return $response->redirect(APP_BASE . '/dashboard?error=Cannot+complete+swap');
     }
 
-    // GET /swaps/:id
-    public function show(array $params): void
+    /**
+     * Cancel a swap (Requester) — NEW
+     */
+    public function cancel(Request $request, Response $response, int $swapId)
     {
-        Auth::requireLogin();
-        $swapId = (int)$params['id'];
+        $userId = Auth::id();
 
-        if (!$this->swaps->canAccess($swapId, Auth::id())) {
-            http_response_code(403);
-            exit('Access denied.');
+        // CSRF check
+        if (!CSRF::verify($request->post('_csrf_token'))) {
+            return $response->redirect(APP_BASE . '/dashboard?error=Invalid+CSRF+token');
         }
 
-        $swap = $this->swaps->getSwapWithDetails($swapId);
-        require APP_ROOT . '/app/Views/swaps/detail.php';
-    }
+        // Get swap
+        $swap = $this->swapModel->getSwap($swapId);
+        if (!$swap || (int)$swap['requester_id'] !== $userId) {
+            return $response->redirect(APP_BASE . '/dashboard?error=Cannot+cancel+this+swap');
+        }
 
-    private function jsonSuccess(array $data): void
-    {
-        header('Content-Type: application/json');
-        echo json_encode(['success' => true, ...$data]);
-    }
+        // Only allow cancel if still requested
+        if ($swap['status'] !== SwapModel::STATUS_REQUESTED) {
+            return $response->redirect(APP_BASE . '/dashboard?error=Only+requested+swaps+can+be+cancelled');
+        }
 
-    private function jsonError(string $message, int $code = 422): void
-    {
-        http_response_code($code);
-        header('Content-Type: application/json');
-        echo json_encode(['success' => false, 'error' => $message]);
+        try {
+            $this->swapModel->decline($swapId, $swap['provider_id']); // Return credits and update status
+            return $response->redirect(APP_BASE . '/dashboard?msg=Swap+cancelled');
+        } catch (\Throwable $e) {
+            error_log('SwapController::cancel failed: ' . $e->getMessage());
+            return $response->redirect(APP_BASE . '/dashboard?error=Failed+to+cancel+swap');
+        }
     }
 }
