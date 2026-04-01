@@ -35,7 +35,6 @@ class SwapController
         $service = $this->services->findWithOwner((int)$v->get('service_id'));
         if (!$service) { $this->jsonError('Service not found.', 404); return; }
 
-        // Can't request your own service
         if ((int)$service['user_id'] === Auth::id()) {
             $this->jsonError('You cannot request your own service.');
             return;
@@ -54,7 +53,10 @@ class SwapController
             return;
         }
 
-        $this->jsonSuccess(['swap_id' => $swapId, 'message' => 'Request sent. Credits are held in escrow.']);
+        $this->jsonSuccess([
+            'swap_id' => $swapId,
+            'message' => 'Request sent. Credits are held in escrow.'
+        ]);
     }
 
     // POST /swaps/:id/accept
@@ -79,6 +81,31 @@ class SwapController
         $ok = $this->swaps->decline((int)$params['id'], Auth::id());
         $ok ? $this->jsonSuccess(['message' => 'Swap declined. Credits returned to requester.'])
             : $this->jsonError('Unable to decline this swap.', 403);
+    }
+
+    // NEW: POST /swaps/:id/cancel
+    public function cancel(array $params): void
+    {
+        Auth::requireLogin();
+        try { CSRF::verify($_POST['_csrf_token'] ?? ''); }
+        catch (\RuntimeException) { $this->jsonError('Invalid CSRF token.', 403); return; }
+
+        $swapId = (int)$params['id'];
+        $swap = $this->swaps->getSwap($swapId);
+
+        if (!$swap || $swap['requester_id'] !== Auth::id()) {
+            $this->jsonError('Swap not found or access denied.', 403);
+            return;
+        }
+
+        if (!in_array($swap['status'], [SwapModel::STATUS_REQUESTED, SwapModel::STATUS_ACCEPTED])) {
+            $this->jsonError('Cannot cancel this swap at its current status.', 403);
+            return;
+        }
+
+        $ok = $this->swaps->cancel($swapId, Auth::id());
+        $ok ? $this->jsonSuccess(['message' => 'Swap canceled. Credits returned to your wallet.'])
+            : $this->jsonError('Unable to cancel this swap.', 403);
     }
 
     // POST /swaps/:id/complete
@@ -112,7 +139,6 @@ class SwapController
             return;
         }
 
-        // Determine who to review
         $revieweeId = (Auth::id() === (int)$swap['requester_id'])
             ? (int)$swap['provider_id']
             : (int)$swap['requester_id'];
