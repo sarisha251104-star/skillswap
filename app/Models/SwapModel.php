@@ -64,9 +64,6 @@ class SwapModel extends BaseModel
         }
     }
 
-    /**
-     * Provider accepts a swap.
-     */
     public function accept(int $swapId, int $providerId): bool
     {
         $stmt = $this->db->prepare(
@@ -76,9 +73,6 @@ class SwapModel extends BaseModel
         return $stmt->execute([self::STATUS_ACCEPTED, $swapId, $providerId, self::STATUS_REQUESTED]);
     }
 
-    /**
-     * Provider declines — credits returned to requester.
-     */
     public function decline(int $swapId, int $providerId): bool
     {
         try {
@@ -111,9 +105,6 @@ class SwapModel extends BaseModel
         }
     }
 
-    /**
-     * Requester confirms completion — credits released to provider.
-     */
     public function confirmComplete(int $swapId, int $requesterId): bool
     {
         try {
@@ -144,6 +135,57 @@ class SwapModel extends BaseModel
             error_log('SwapModel::confirmComplete failed: ' . $e->getMessage());
             return false;
         }
+    }
+
+    /**
+     * Cancel a requested swap by requester, return credits
+     */
+    public function cancel(int $swapId, int $requesterId): bool
+    {
+        try {
+            $this->db->beginTransaction();
+
+            $swap = $this->getSwap($swapId);
+            if (!$swap || $swap['requester_id'] != $requesterId || $swap['status'] !== self::STATUS_REQUESTED) {
+                $this->db->rollBack();
+                return false;
+            }
+
+            // Return credits
+            $this->db->prepare('UPDATE users SET credits = credits + ? WHERE id = ?')
+                     ->execute([$swap['credits_escrowed'], $requesterId]);
+
+            // Mark as canceled
+            $this->db->prepare('UPDATE swap_requests SET status=?, updated_at=NOW() WHERE id=?')
+                     ->execute(['canceled', $swapId]);
+
+            // Ledger entry
+            $this->db->prepare(
+                'INSERT INTO escrow_ledger (swap_id, user_id, amount, type, created_at) VALUES (?,?,?,?,NOW())'
+            )->execute([$swapId, $requesterId, $swap['credits_escrowed'], 'returned']);
+
+            $this->db->commit();
+            return true;
+
+        } catch (\Throwable $e) {
+            $this->db->rollBack();
+            error_log('SwapModel::cancel failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get total escrow credits for a user
+     */
+    public function getUserEscrowCredits(int $userId): int
+    {
+        $stmt = $this->db->prepare(
+            'SELECT COALESCE(SUM(credits_escrowed),0) as escrow
+             FROM swap_requests
+             WHERE requester_id = ? AND status = ?'
+        );
+        $stmt->execute([$userId, self::STATUS_REQUESTED]);
+        return (int)$stmt->fetchColumn();
     }
 
     public function getSwap(int $id): array|false
