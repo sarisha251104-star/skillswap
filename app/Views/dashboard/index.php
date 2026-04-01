@@ -1,5 +1,4 @@
 <?php
-// app/Views/dashboard/index.php
 $pageTitle = 'Dashboard';
 use App\Core\Validator;
 use App\Middleware\Auth;
@@ -21,7 +20,6 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
   </div>
 
   <div class="dash-grid">
-    <!-- ── Sidebar ── -->
     <div class="dash-sidebar">
       <div class="profile-card">
         <div class="profile-big-avatar"><?= strtoupper(mb_substr($user['full_name'], 0, 1)) ?></div>
@@ -30,9 +28,11 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
         <div class="credit-display">
           <div class="credit-number" id="dashCredits"><?= (int)$user['credits'] ?></div>
           <div class="credit-label">Available Credits</div>
+          <div class="credit-escrow" style="font-size:12px;color:var(--muted)">
+            In Escrow: <?= (int)array_sum(array_map(fn($s)=>$s['credits_escrowed'] ?? 0, array_filter($mySwaps, fn($s)=>in_array($s['status'], ['requested','accepted','in_progress'])))) ?>
+          </div>
         </div>
-        <span class="badge badge-<?= Validator::e($user['subscription_plan']) ?>"
-              style="font-size:12px;padding:5px 14px">
+        <span class="badge badge-<?= Validator::e($user['subscription_plan']) ?>" style="font-size:12px;padding:5px 14px">
           <?= ucfirst(Validator::e($user['subscription_plan'])) ?> Plan
         </span>
       </div>
@@ -58,10 +58,7 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
       <a href="<?= APP_BASE ?>/subscriptions" class="btn btn-dark" style="text-align:center">Upgrade Plan</a>
     </div>
 
-    <!-- ── Main content ── -->
     <div class="dash-main">
-
-      <!-- Active Swaps -->
       <div class="card">
         <div class="flex-between" style="margin-bottom:16px">
           <h2 class="card-title" style="margin-bottom:0">Active Swaps</h2>
@@ -90,13 +87,13 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
                 <span class="badge badge-<?= Validator::e($swap['status']) ?>"><?= ucfirst(str_replace('_',' ',$swap['status'])) ?></span>
                 <a href="<?= APP_BASE ?>/messages/<?= (int)$swap['id'] ?>" class="btn btn-outline btn-sm">Chat</a>
                 <?php if ($swap['status'] === 'requested' && Auth::id() === (int)$swap['provider_id']): ?>
-                  <button class="btn btn-primary btn-sm"
-                          onclick="swapAction(<?= (int)$swap['id'] ?>, 'accept', this)">Accept</button>
-                  <button class="btn btn-ghost btn-sm"
-                          onclick="swapAction(<?= (int)$swap['id'] ?>, 'decline', this)">Decline</button>
+                  <button class="btn btn-primary btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'accept', this)">Accept</button>
+                  <button class="btn btn-ghost btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'decline', this)">Decline</button>
                 <?php elseif ($swap['status'] === 'accepted' && Auth::id() === (int)$swap['requester_id']): ?>
-                  <button class="btn btn-primary btn-sm"
-                          onclick="swapAction(<?= (int)$swap['id'] ?>, 'complete', this)">✓ Complete</button>
+                  <button class="btn btn-primary btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'complete', this)">✓ Complete</button>
+                <?php endif; ?>
+                <?php if (in_array($swap['status'], ['requested','accepted']) && Auth::id() === (int)$swap['requester_id']): ?>
+                  <button class="btn btn-ghost btn-sm" onclick="swapAction(<?= (int)$swap['id'] ?>, 'cancel', this)">Cancel</button>
                 <?php endif; ?>
               </div>
             </div>
@@ -104,7 +101,6 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
         <?php endif; ?>
       </div>
 
-      <!-- My Listings -->
       <div class="card">
         <div class="flex-between" style="margin-bottom:16px">
           <h2 class="card-title" style="margin-bottom:0">My Listings</h2>
@@ -133,7 +129,6 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
         <?php endif; ?>
       </div>
 
-      <!-- Completed swaps -->
       <?php
         $completedList = array_filter($mySwaps, fn($s) => $s['status'] === 'completed');
       ?>
@@ -147,9 +142,7 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
               <div class="swap-title"><?= Validator::e($swap['service_title']) ?></div>
               <div class="swap-with">with <?= Validator::e(Auth::id() === (int)$swap['requester_id'] ? $swap['provider_name'] : $swap['requester_name']) ?></div>
             </div>
-            <button class="btn btn-outline btn-sm" onclick="openReviewModal(<?= (int)$swap['id'] ?>)">
-              ★ Review
-            </button>
+            <button class="btn btn-outline btn-sm" onclick="openReviewModal(<?= (int)$swap['id'] ?>)">★ Review</button>
           </div>
         <?php endforeach; ?>
       </div>
@@ -158,7 +151,6 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
   </div>
 </div>
 
-<!-- ── Add Service Modal ── -->
 <div class="modal-overlay" id="modal-addService">
   <div class="modal">
     <h2 class="modal-title">List a Service</h2>
@@ -192,7 +184,6 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
   </div>
 </div>
 
-<!-- ── Review Modal ── -->
 <div class="modal-overlay" id="modal-review">
   <div class="modal">
     <h2 class="modal-title">Leave a Review</h2>
@@ -219,7 +210,6 @@ $categories = ['Design','Tech','Writing','Photography','Tutoring','Home Services
 </div>
 
 <script>
-// Activate star on hover/click
 document.querySelectorAll('.star').forEach(star => {
   star.addEventListener('mouseover', () => {
     const val = parseInt(star.dataset.val);
@@ -237,6 +227,19 @@ document.getElementById('starContainer')?.addEventListener('mouseleave', () => {
     s.style.color = parseInt(s.dataset.val) <= val ? 'var(--caramel)' : 'var(--light)';
   });
 });
+
+function swapAction(swapId, action, btn) {
+  btn.disabled = true;
+  const token = '<?= Validator::e(\App\Core\CSRF::generate()) ?>';
+  fetch(`<?= APP_BASE ?>/swaps/${swapId}/${action}`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/x-www-form-urlencoded'},
+    body: `_csrf_token=${token}`
+  }).then(res => res.json()).then(res => {
+    if(res.success) location.reload();
+    else { alert(res.error); btn.disabled = false; }
+  }).catch(e => { alert('Error'); btn.disabled = false; });
+}
 </script>
 
 <?php require APP_ROOT . '/app/Views/layouts/footer.php'; ?>
